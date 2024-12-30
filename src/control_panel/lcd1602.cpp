@@ -18,13 +18,24 @@ LCD1602::LCD1602(uint8_t addr,
 	  master_scl_io(master_scl_io),
 	  master_sda_io(master_sda_io),
 	  i2c_port(i2c_port),
-	  master_freq_hz(master_freq_hz)
+	  master_freq_hz(master_freq_hz),
+	  bus_handle(nullptr),
+	  lcd_handle(nullptr)
 {
+}
+
+LCD1602::~LCD1602()
+{
+	if (this->lcd_handle != nullptr) {
+		i2c_master_bus_rm_device(this->lcd_handle);
+	}
+	if (this->bus_handle != nullptr) {
+		i2c_del_master_bus(this->bus_handle);
+	}
 }
 
 void LCD1602::send_cmd(char cmd)
 {
-	esp_err_t err;
 	char data_u, data_l;
 	uint8_t data_t[4];
 	data_u = (cmd & 0xf0);
@@ -33,17 +44,25 @@ void LCD1602::send_cmd(char cmd)
 	data_t[1] = data_u | 0x08; // en=0, rs=0
 	data_t[2] = data_l | 0x0C; // en=1, rs=0
 	data_t[3] = data_l | 0x08; // en=0, rs=0
-
 	ESP_ERROR_CHECK(i2c_master_transmit(this->lcd_handle, data_t, 4, 1000));
 }
 
 void LCD1602::init_master()
 {
+	if (this->bus_handle != nullptr || this->lcd_handle != nullptr) {
+		ESP_LOGW(TAG, "LCD already initialized");
+		return;
+	}
+
 	i2c_master_bus_config_t i2c_mst_config = {
 		.i2c_port = this->i2c_port,
 		.sda_io_num = this->master_sda_io,
 		.scl_io_num = this->master_scl_io,
 		.clk_source = I2C_CLK_SRC_DEFAULT,
+		.glitch_ignore_cnt = 7,
+		.flags = {
+			.enable_internal_pullup = true
+		}
 	};
 
 	ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_mst_config, &this->bus_handle));
@@ -54,11 +73,13 @@ void LCD1602::init_master()
 		.scl_speed_hz = this->master_freq_hz,
 	};
 
-	ESP_ERROR_CHECK(i2c_master_bus_add_device(bus_handle, &dev_cfg, &this->lcd_handle));
+	ESP_ERROR_CHECK(i2c_master_bus_add_device(this->bus_handle, &dev_cfg, &this->lcd_handle));
 }
 
 void LCD1602::init()
 {
+	this->init_master();
+
 	// 4 bit initialisation
 	vTaskDelay(pdMS_TO_TICKS(50)); // wait for >40ms
 	this->send_cmd(0x30);
@@ -73,19 +94,14 @@ void LCD1602::init()
 	// dislay initialisation
 	this->send_cmd(0x28); // Function set --> DL=0 (4 bit mode), N = 1 (2 line display) F = 0 (5x8 characters)
 	esp_rom_delay_us(1000);
-	// vTaskDelay(pdMS_TO_TICKS(1));
 	this->send_cmd(0x08); // Display on/off control --> D=0,C=0, B=0  ---> display off
 	esp_rom_delay_us(1000);
-	// vTaskDelay(pdMS_TO_TICKS(1));
 	this->send_cmd(0x01); // clear display
 	esp_rom_delay_us(2000);
-	// vTaskDelay(pdMS_TO_TICKS(2));
 	this->send_cmd(0x06); // Entry mode set --> I/D = 1 (increment cursor) & S = 0 (no shift)
 	esp_rom_delay_us(1000);
-	// vTaskDelay(pdMS_TO_TICKS(1));
 	this->send_cmd(0x0C); // Display on/off control --> D = 1, C and B = 0. (Cursor and blink, last two bits)
 	esp_rom_delay_us(2000);
-	// vTaskDelay(pdMS_TO_TICKS(2));
 }
 
 void LCD1602::put_cur(int row, int col)
@@ -109,10 +125,10 @@ void LCD1602::send_data(char data)
 	uint8_t data_t[4];
 	data_u = (data & 0xf0);
 	data_l = ((data << 4) & 0xf0);
-	data_t[0] = data_u | 0x0D; // en=1, rs=0
-	data_t[1] = data_u | 0x09; // en=0, rs=0
-	data_t[2] = data_l | 0x0D; // en=1, rs=0
-	data_t[3] = data_l | 0x09; // en=0, rs=0
+	data_t[0] = data_u | 0x0D; // en=1, rs=1
+	data_t[1] = data_u | 0x09; // en=0, rs=1
+	data_t[2] = data_l | 0x0D; // en=1, rs=1
+	data_t[3] = data_l | 0x09; // en=0, rs=1
 	ESP_ERROR_CHECK(i2c_master_transmit(this->lcd_handle, data_t, 4, 1000));
 }
 
@@ -123,15 +139,14 @@ void LCD1602::send_char(char ch)
 
 void LCD1602::send_string(std::string str)
 {
-	for (auto ch : str)
+	for (char c : str)
 	{
-		this->send_data(ch);
+		this->send_data(c);
 	}
 }
 
 void LCD1602::clear()
 {
 	this->send_cmd(0x01);
-	esp_rom_delay_us(5000);
-	// vTaskDelay(pdMS_TO_TICKS(5));
+	esp_rom_delay_us(2000);
 }

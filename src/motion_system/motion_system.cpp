@@ -1,10 +1,11 @@
 #include "motion_system.hpp"
 #include "freertos/FreeRTOS.h"
+#include "esp_log.h"
 #include <iostream>
 
 void MotionSystem::move_x_to_end()
 {
-    this->motorX.move_forward(this->cutting_speed);
+    this->motorX.move_forward(this->cutting_speed->get());
     while (1)
     {
         if (gpio_get_level(this->xEndLimit) == 0)
@@ -18,7 +19,7 @@ void MotionSystem::move_x_to_end()
 
 void MotionSystem::move_x_to_start()
 {
-    this->motorX.move_backward(this->cutting_speed);
+    this->motorX.move_backward(this->cutting_speed->get());
     while (1)
     {
         if (gpio_get_level(this->xStartLimit) == 0)
@@ -33,7 +34,7 @@ void MotionSystem::move_x_to_start()
 bool MotionSystem::move_y_steps()
 {
     this->yEncoder.reset();
-    this->motorY.move_forward(this->cutting_speed);
+    this->motorY.move_forward(this->cutting_speed->get());
     while (1)
     {
         if (gpio_get_level(this->yEndLimit) == 0)
@@ -41,7 +42,7 @@ bool MotionSystem::move_y_steps()
             this->motorY.stop();
             return true;
         }
-        else if (this->yEncoder.read() >= this->y_offset)
+        else if (this->yEncoder.read() >= this->y_offset->get())
         {
             this->motorY.stop();
             return false;
@@ -54,13 +55,12 @@ void MotionSystem::move_task()
 {
     while (true)
     {
-        move_x_to_end();
-        if (move_y_steps())
+        this->move_x_to_end();
+        if (this->move_y_steps())
             break;
-        move_x_to_start();
-        if (move_y_steps())
+        this->move_x_to_start();
+        if (this->move_y_steps())
             break;
-        ;
     }
     this->move_task_handle = nullptr;
     vTaskDelete(nullptr);
@@ -69,8 +69,9 @@ void MotionSystem::move_task()
 void MotionSystem::home_task()
 {
     std::cout << "start home" << std::endl;
-    this->motorX.move_backward(this->travel_speed);
-    this->motorY.move_backward(this->travel_speed);
+    float speed = this->travel_speed->get();
+    this->motorX.move_backward(speed);
+    this->motorY.move_backward(speed);
     std::cout << "moving" << std::endl;
     while (1)
     {
@@ -91,19 +92,30 @@ void MotionSystem::home_task()
     vTaskDelete(nullptr);
 }
 
-MotionSystem::MotionSystem(Motor &motorX, Motor &motorY, gpio_num_t yEncoder, gpio_num_t yStartLimit, gpio_num_t yEndLimit, gpio_num_t xStartLimit, gpio_num_t xEndLimit) : motorX(motorX),
-                                                                                                                                                                            motorY(motorY),
-                                                                                                                                                                            yEncoder(yEncoder),
-                                                                                                                                                                            yStartLimit(yStartLimit),
-                                                                                                                                                                            yEndLimit(yEndLimit),
-                                                                                                                                                                            xStartLimit(xStartLimit),
-                                                                                                                                                                            xEndLimit(xEndLimit),
-                                                                                                                                                                            move_task_handle(nullptr),
-                                                                                                                                                                            home_task_handle(nullptr),
-                                                                                                                                                                            cutting_speed(0.5),
-                                                                                                                                                                            travel_speed(1),
-                                                                                                                                                                            y_offset(3)
+MotionSystem::MotionSystem(Motor &motorX, Motor &motorY,
+                           gpio_num_t yEncoder, gpio_num_t yStartLimit, gpio_num_t yEndLimit,
+                           gpio_num_t xStartLimit, gpio_num_t xEndLimit,
+                           std::shared_ptr<BoundedNumber<float>> cutting_speed,
+                           std::shared_ptr<BoundedNumber<float>> travel_speed,
+                           std::shared_ptr<BoundedNumber<uint32_t>> y_offset)
+    : motorX(motorX),
+      motorY(motorY),
+      yEncoder(yEncoder),
+      yStartLimit(yStartLimit),
+      yEndLimit(yEndLimit),
+      xStartLimit(xStartLimit),
+      xEndLimit(xEndLimit),
+      move_task_handle(nullptr),
+      home_task_handle(nullptr),
+      cutting_speed(cutting_speed),
+      travel_speed(travel_speed),
+      y_offset(y_offset)
 {
+}
+
+MotionSystem::~MotionSystem()
+{
+    stop(); // Ensure all tasks are stopped
 }
 
 void MotionSystem::init()
@@ -113,14 +125,14 @@ void MotionSystem::init()
     this->motorY.init();
 
     gpio_config_t io_conf = {
-        .pin_bit_mask = (uint64_t)(1 << (this->yStartLimit) |
-                                   1 << (this->yEndLimit) |
-                                   1 << (this->xStartLimit) |
-                                   1 << (this->xEndLimit)),
+        .pin_bit_mask = ((1ULL << this->yStartLimit) |
+                         (1ULL << this->yEndLimit) |
+                         (1ULL << this->xStartLimit) |
+                         (1ULL << this->xEndLimit)),
         .mode = GPIO_MODE_INPUT,
         .pull_up_en = GPIO_PULLUP_ENABLE,
     };
-    gpio_config(&io_conf);
+    ESP_ERROR_CHECK(gpio_config(&io_conf));
 }
 
 void MotionSystem::move()
@@ -135,10 +147,19 @@ void MotionSystem::stop()
 {
     this->motorY.stop();
     this->motorX.stop();
+    
     if (this->move_task_handle != nullptr)
-        vTaskDelete(this->move_task_handle);
+    {
+        TaskHandle_t move_handle = this->move_task_handle;
+        this->move_task_handle = nullptr;
+        vTaskDelete(move_handle);
+    }
     if (this->home_task_handle != nullptr)
-        vTaskDelete(this->home_task_handle);
+    {
+        TaskHandle_t home_handle = this->home_task_handle;
+        this->home_task_handle = nullptr;
+        vTaskDelete(home_handle);
+    }
 }
 
 void MotionSystem::home()
@@ -146,6 +167,5 @@ void MotionSystem::home()
     if (this->move_task_handle != nullptr || this->home_task_handle != nullptr)
         return;
     xTaskCreate([](void *param)
-                { 
-                    ((MotionSystem *)param)->home_task(); }, "motion_system_home_task", 8096, this, 5, &this->home_task_handle);
+                { ((MotionSystem *)param)->home_task(); }, "motion_system_home_task", 8096, this, 5, &this->home_task_handle);
 }
