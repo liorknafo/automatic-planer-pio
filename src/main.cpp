@@ -1,16 +1,16 @@
 #include "esp_system.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
-#include <iostream>
 #include <memory>
 
 #include "motion_system/motion_system.hpp"
 
 #include "control_panel/menu_items/menu_item_bounded_number.hpp"
+#include "control_panel/menu_items/menu_item_motor_control.hpp"
 #include "control_panel/lcd1602.hpp"
 #include "control_panel/joystick.hpp"
 #include "control_panel/menu.hpp"
-#include "control_panel/switch.hpp"
+#include "switch.hpp"
 
 #define HOME_PIN GPIO_NUM_27
 #define START_PIN GPIO_NUM_25
@@ -28,12 +28,16 @@
 #define LCD_NUM_COLUMNS 16
 #define LCD_ADDR 0x27 // Adjust based on your I²C adapter address
 
+static const char *TAG = "Main";
+
 auto xMotor = Motor(GPIO_NUM_26, LEDC_CHANNEL_0, GPIO_NUM_18, LEDC_CHANNEL_1);
 auto yMotor = Motor(GPIO_NUM_19, LEDC_CHANNEL_2, GPIO_NUM_23, LEDC_CHANNEL_3);
 
-auto cutting_speed = std::make_shared<BoundedNumber<float>>(0.5, 0.01, 1.0);
-auto travel_speed = std::make_shared<BoundedNumber<float>>(1.0, 0.01, 1.0);
+auto cutting_speed = std::make_shared<BoundedNumber<float>>(1.0, 0.7, 1.0);
+auto travel_speed = std::make_shared<BoundedNumber<float>>(1.0, 0.7, 1.0);
 auto y_offset = std::make_shared<BoundedNumber<uint32_t>>(3, 1, 100);
+
+auto joystick = Joystick(X_CHANNEL, Y_CHANNEL, BUTTON_JOYSTICK);
 
 auto motion_system = MotionSystem(
     xMotor,
@@ -45,7 +49,8 @@ auto motion_system = MotionSystem(
     GPIO_NUM_5,
     cutting_speed,
     travel_speed,
-    y_offset);
+    y_offset,
+    joystick);
 
 auto lcd = LCD1602(LCD_ADDR,
                    LCD_NUM_ROWS,
@@ -55,7 +60,6 @@ auto lcd = LCD1602(LCD_ADDR,
                    I2C_MASTER_NUM,
                    I2C_MASTER_FREQ_HZ);
 
-auto joystick = Joystick(X_CHANNEL, Y_CHANNEL, BUTTON_JOYSTICK, 600);
 auto menu = Menu(lcd);
 
 auto homeButton = Switch(HOME_PIN);
@@ -64,26 +68,20 @@ auto stopButton = Switch(STOP_PIN);
 
 extern "C" void app_main()
 {
-    lcd.init();
-    joystick.start_task();
 
     menu.add_menu_item(std::make_unique<MenuItemBoundedNumber<float>>("Cut Speed", cutting_speed, 0.01));
     menu.add_menu_item(std::make_unique<MenuItemBoundedNumber<float>>("Trv Speed", travel_speed, 0.01));
     menu.add_menu_item(std::make_unique<MenuItemBoundedNumber<uint32_t>>("Y Offset", y_offset, 1));
+    menu.add_menu_item(std::make_unique<MenuItemMotorControl>(motion_system));
     menu.start_task(joystick);
-    std::cout << "menu setup" << std::endl;
 
-    motion_system.init();
     homeButton.add_on_press_callback([]()
                                      { motion_system.home(); });
-    homeButton.init();
 
     startButton.add_on_press_callback([]()
                                       { motion_system.move(); });
-    startButton.init();
 
     stopButton.add_on_press_callback([]()
                                      { motion_system.stop(); });
-    stopButton.init();
-    std::cout << "done setup" << std::endl;
+    ESP_LOGI(TAG, "done setup");
 }

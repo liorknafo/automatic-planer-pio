@@ -2,11 +2,6 @@
 
 Encoder::Encoder(gpio_num_t pin) : button(pin), count(0)
 {
-}
-
-void Encoder::init()
-{
-    this->button.init();
     this->button.add_on_press_callback([this]() {
         this->count++;
     });

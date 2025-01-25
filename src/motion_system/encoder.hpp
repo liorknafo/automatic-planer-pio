@@ -1,7 +1,7 @@
 #pragma once
 #include <driver/gpio.h>
 #include <stdint.h>
-#include "../control_panel/switch.hpp"
+#include "switch.hpp"
 
 class Encoder
 {
@@ -12,7 +12,6 @@ private:
 public:
     Encoder(gpio_num_t pin);
     
-    void init();
     int read();
     void reset();
 };

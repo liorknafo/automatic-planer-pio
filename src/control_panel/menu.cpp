@@ -2,8 +2,9 @@
 #include "menu.hpp"
 #include "freertos/FreeRTOS.h"
 #include <format>
-#include <iostream>
 #include "esp_log.h"
+
+static const char* TAG = "Menu";
 
 Menu::Menu(LCD1602 &lcd)
     : lcd(lcd),
@@ -32,10 +33,15 @@ void Menu::joystick_event_handler(JosystickEvent event)
         return;
     }
 
-    cout << "event: " << event << endl;
+    ESP_LOGD(TAG, "event: %d", static_cast<int>(event));
+    
     if (event == JosystickEvent::BUTTON)
     {
         this->selected = !this->selected;
+        if(this->selected)
+            this->items[this->hover]->on_select();
+        else
+            this->items[this->hover]->on_unselect();
         return;
     }
 
@@ -128,6 +134,6 @@ void Menu::start_task(Joystick &joystick)
                 { ((Menu *)param)->task(); }, "menu_task", 8096, this, 5, &this->task_handle);
 
     if (result != pdPASS || this->task_handle == nullptr) {
-        ESP_LOGE("Menu", "Failed to create menu task");
+        ESP_LOGE(TAG, "Failed to create menu task");
     }
 }

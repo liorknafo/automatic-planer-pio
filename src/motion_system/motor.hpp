@@ -9,9 +9,9 @@ gpio_num_t in1; ledc_channel_t in1_channel; gpio_num_t in2; ledc_channel_t in2_c
 public:
     Motor(gpio_num_t in1, ledc_channel_t in1_channel, gpio_num_t in2, ledc_channel_t in2_channel);
 
-    void init();
     void move_forward(float speed);
     void move(bool forward, float speed);
     void move_backward(float speed);
     void stop();
+    void move(float speed);
 };

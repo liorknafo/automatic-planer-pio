@@ -2,7 +2,7 @@
 #include "freertos/FreeRTOS.h"
 #include "esp_log.h"
 #include "lcd1602.hpp"
-// Adjust based on your I²C adapter address
+
 #define TAG "LCD1602"
 
 LCD1602::LCD1602(uint8_t addr,
@@ -21,33 +21,6 @@ LCD1602::LCD1602(uint8_t addr,
 	  master_freq_hz(master_freq_hz),
 	  bus_handle(nullptr),
 	  lcd_handle(nullptr)
-{
-}
-
-LCD1602::~LCD1602()
-{
-	if (this->lcd_handle != nullptr) {
-		i2c_master_bus_rm_device(this->lcd_handle);
-	}
-	if (this->bus_handle != nullptr) {
-		i2c_del_master_bus(this->bus_handle);
-	}
-}
-
-void LCD1602::send_cmd(char cmd)
-{
-	char data_u, data_l;
-	uint8_t data_t[4];
-	data_u = (cmd & 0xf0);
-	data_l = ((cmd << 4) & 0xf0);
-	data_t[0] = data_u | 0x0C; // en=1, rs=0
-	data_t[1] = data_u | 0x08; // en=0, rs=0
-	data_t[2] = data_l | 0x0C; // en=1, rs=0
-	data_t[3] = data_l | 0x08; // en=0, rs=0
-	ESP_ERROR_CHECK(i2c_master_transmit(this->lcd_handle, data_t, 4, 1000));
-}
-
-void LCD1602::init_master()
 {
 	if (this->bus_handle != nullptr || this->lcd_handle != nullptr) {
 		ESP_LOGW(TAG, "LCD already initialized");
@@ -74,11 +47,6 @@ void LCD1602::init_master()
 	};
 
 	ESP_ERROR_CHECK(i2c_master_bus_add_device(this->bus_handle, &dev_cfg, &this->lcd_handle));
-}
-
-void LCD1602::init()
-{
-	this->init_master();
 
 	// 4 bit initialisation
 	vTaskDelay(pdMS_TO_TICKS(50)); // wait for >40ms
@@ -102,6 +70,29 @@ void LCD1602::init()
 	esp_rom_delay_us(1000);
 	this->send_cmd(0x0C); // Display on/off control --> D = 1, C and B = 0. (Cursor and blink, last two bits)
 	esp_rom_delay_us(2000);
+}
+
+LCD1602::~LCD1602()
+{
+	if (this->lcd_handle != nullptr) {
+		i2c_master_bus_rm_device(this->lcd_handle);
+	}
+	if (this->bus_handle != nullptr) {
+		i2c_del_master_bus(this->bus_handle);
+	}
+}
+
+void LCD1602::send_cmd(char cmd)
+{
+	char data_u, data_l;
+	uint8_t data_t[4];
+	data_u = (cmd & 0xf0);
+	data_l = ((cmd << 4) & 0xf0);
+	data_t[0] = data_u | 0x0C; // en=1, rs=0
+	data_t[1] = data_u | 0x08; // en=0, rs=0
+	data_t[2] = data_l | 0x0C; // en=1, rs=0
+	data_t[3] = data_l | 0x08; // en=0, rs=0
+	ESP_ERROR_CHECK(i2c_master_transmit(this->lcd_handle, data_t, 4, 1000));
 }
 
 void LCD1602::put_cur(int row, int col)

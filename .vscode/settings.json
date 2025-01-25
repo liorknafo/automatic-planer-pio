@@ -1,4 +1,9 @@
 {
+    "github.copilot.chat.codeGeneration.instructions": [
+        {
+            "file": ".copilot-instructions.md"
+        }
+    ],
     "files.associations": {
         "*.yaml": "yaml",
         "array": "cpp",

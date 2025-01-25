@@ -12,6 +12,15 @@ Switch::Switch(gpio_num_t pin, uint32_t debounce_time_ms)
     , on_release_callbacks()
     , debounce_time_ms(debounce_time_ms)
 {
+    gpio_config_t io_conf = {
+        .pin_bit_mask = 1ULL << this->pin,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE
+    };
+    
+    ESP_ERROR_CHECK(gpio_config(&io_conf));
 }
 
 Switch::~Switch()
@@ -22,20 +31,16 @@ Switch::~Switch()
     }
 }
 
-void Switch::init()
+void Switch::start_task_if_needed()
 {
-    gpio_config_t io_conf = {
-        .pin_bit_mask = 1ULL << this->pin,
-        .mode = GPIO_MODE_INPUT,
-        .pull_up_en = GPIO_PULLUP_ENABLE,
-    };
-    
-    ESP_ERROR_CHECK(gpio_config(&io_conf));
+    if (this->task_handle != nullptr) {
+        return;
+    }
 
     BaseType_t task_created = xTaskCreate(
         [](void *param) { ((Switch *)param)->task(); },
         "button_task",
-        1024,
+        2048,
         this,
         5,
         &this->task_handle
@@ -43,7 +48,6 @@ void Switch::init()
 
     if (task_created != pdPASS) {
         ESP_LOGE(TAG, "Failed to create button task for pin %d", this->pin);
-        return;
     }
 }
 
@@ -54,8 +58,7 @@ void Switch::task()
     
     while (true)
     {
-        // because of the pull up resistor the switch is active low
-        bool current_state = gpio_get_level(this->pin) == 0;
+        bool current_state = gpio_get_level(this->pin) == 1;
         int64_t current_time = esp_timer_get_time();
         
         if (current_state != last_state) {
@@ -79,16 +82,31 @@ void Switch::task()
             }
         }
 
-        vTaskDelay(pdMS_TO_TICKS(10)); // Faster polling for better response
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
 
 void Switch::add_on_press_callback(std::function<void()> callback)
 {
     this->on_press_callbacks.push_back(callback);
+    this->start_task_if_needed();
 }
 
 void Switch::add_on_release_callback(std::function<void()> callback)
 {
     this->on_release_callbacks.push_back(callback);
+    this->start_task_if_needed();
+}
+
+void Switch::wait_for(bool target_state)
+{
+    while (gpio_get_level(this->pin) != target_state)
+    {
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+}
+
+bool Switch::get() const
+{
+    return gpio_get_level(this->pin) == 1;
 }

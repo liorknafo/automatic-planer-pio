@@ -14,12 +14,14 @@ private:
     uint32_t debounce_time_ms;
 
     void task();
+    void start_task_if_needed();
 
 public:
     Switch(gpio_num_t pin, uint32_t debounce_time_ms = 50);
     ~Switch();
 
-    void init();
     void add_on_press_callback(std::function<void()> callback);
     void add_on_release_callback(std::function<void()> callback);
+    void wait_for(bool pressed);
+    bool get() const;
 };
